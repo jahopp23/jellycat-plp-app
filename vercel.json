@@ -1,0 +1,7 @@
+{
+  "installCommand": "npm install --include=optional",
+  "env": {
+    "SESSION_SECRET": "foobar",
+    "PUBLIC_STORE_DOMAIN": "mock.shop"
+  }
+}
