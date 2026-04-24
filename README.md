@@ -5,12 +5,12 @@ This project implements a Product Listing Page (PLP) for the Jellycat technical 
 The architecture is intentionally product-based. Each product appears once in the listing, and variant complexity is progressively revealed based on user interaction. This keeps the initial experience fast and readable while still supporting full product configuration when needed.
 
 ## Vercel deployment
-[https://jellycat-plp-assessment.vercel.app/](https://jellycat-plp-assessment.vercel.app/)
+[https://jellycat-plp-app.vercel.app/](https://jellycat-plp-app.vercel.app/)
 
 ## PageSpeed
-Mobile: [https://pagespeed.web.dev/analysis/https-jellycat-plp-assessment-vercel-app/504hlel58b?form_factor=mobile](https://pagespeed.web.dev/analysis/https-jellycat-plp-assessment-vercel-app/504hlel58b?form_factor=mobile)
+Mobile: [https://pagespeed.web.dev/analysis/https-jellycat-plp-app-vercel-app/vzrmlh8o7k?form_factor=mobile](https://pagespeed.web.dev/analysis/https-jellycat-plp-app-vercel-app/vzrmlh8o7k?form_factor=mobile)
 
-Desktop: [https://pagespeed.web.dev/analysis/https-jellycat-plp-assessment-vercel-app/504hlel58b?form_factor=desktop](https://pagespeed.web.dev/analysis/https-jellycat-plp-assessment-vercel-app/504hlel58b?form_factor=desktop)
+Desktop: [https://pagespeed.web.dev/analysis/https-jellycat-plp-app-vercel-app/vzrmlh8o7k?form_factor=desktop](https://pagespeed.web.dev/analysis/https-jellycat-plp-app-vercel-app/vzrmlh8o7k?form_factor=desktop)
 
 ## Local development
 
@@ -101,13 +101,11 @@ In this implementation, **PLP** responses (`app/routes/_index.tsx`) use `Cache-C
 | `MenCollectionProducts` |Collection cursor page + **preview** variants (variable `previewVariants`)|`getMenCollectionProducts` → list loaders, [`/api/products`](app/routes/api.products.tsx) |
 | `MenPlpProductVariants` (paginated) | **Full** variant matrix for one `handle` |`getProductVariantMatrix` → [`/api/products/:handle/variants`](app/routes/api.products.$handle.variants.tsx) (and product route where needed) |
 
-**Execution path:** all of the above go through [`mockShopFetch`](app/lib/mock-shop/fetch.ts) — a plain `fetch(POST, …)` to the **mock.shop** API URL with `{ query, variables }` in the body. This path does **not** use Hydrogen’s `context.storefront.query`, and the responses are **not** stored in a custom app cache. Each **Remix** request that misses HTML/JSON cache runs the GraphQL again. Shared caches rarely treat `POST` the same as `GET`, so you should not assume a CDN in front of mock.shop deduplicates GQL; what **is** cacheable in practice is the **outgoing Remix response** (headers above). **Unrelated** template routes (e.g. account, search) still call `context.storefront.query` with the Hydrogen client tied to the worker’s [`caches.open('hydrogen')` in `server.ts`](server.ts) — that is a **different** GraphQL stack and is **out of scope** for the men PLP write-up.
-
 The **full variant** JSON for “more options” (`app/routes/api.products.$handle.variants.tsx`) is HTTP-cached only a **few** seconds: `max-age=2, s-maxage=5, stale-while-revalidate=15` (errors: `no-store`). The client may **re-validate** availability at add time; in a full BFF you would often split “catalog” vs “stock” fetches. This repo keeps a single `mockShopFetch` without a separate GQL key-value store.
 
 To communicate staleness, the UI treats availability as a best-effort state and includes messaging such as “Availability confirmed at checkout.” If a user attempts to add a variant that has sold out, the action fails gracefully and prompts the user to select another option.
 
-The pattern is: **longer** `Cache-Control` for the **PLP and list JSON** (bounded staleness) and **shorter** for the **per-product variant** JSON, while **outbound `POST` GraphQL** is only indirectly bounded by those HTTP layers—see the values in the previous paragraph and the route files.
+The pattern is: **longer** `Cache-Control` for the **PLP and list JSON** (bounded staleness) and **shorter** for the **per-product variant** JSON, while **outbound `POST` GraphQL** is only indirectly bounded by those HTTP layers.
 
 
 ## Pre-launch and go-live
@@ -130,19 +128,25 @@ This approach ensures that the system remains scalable and performant while main
 
 ## What we would do differently in production
 
-This assessment focuses on a clear data model, UX, and `Cache-Control` on Remix. In a real storefront, the next steps would be:
+At write time, I would move the final add-to-cart flow to a server-side cart layer that integrates with Shopify’s cart or checkout APIs, ensuring that inventory is validated at mutation time rather than relying on client-side re-reads.
 
-- **System of record at write time:** a **server-side cart / OMS** (or order API) that **reserves** or **decrements** inventory and returns authoritative sold-out/oversell errors, not only client re-reads before a demo bag.
-- **Data split:** **catalog/merch** fetches and **stock/availability** fetches (or a dedicated availability service) with different caches and **TTLs** or **event-driven** invalidation on go-live and inventory changes. Optionally a **BFF** cache for `POST` GraphQL only where keys and safety rules are well defined.
-- **Config and go-live:** `DROP_LIVE` / feature flags and **time-based** go-live in **config** (not `drop-config` constants in source), with **targeted** CDN/purge for PLP and list JSON.
-- **Observability and resilience:** tracing and metrics on Storefront and route latency, SLOs on error rates during spikes, and capacity limits to protect the API.
-- **Preview and rollout:** A/B on preview depth or `defer` window size, driven by data rather than a single `PREVIEW_*` constant, if the business wants it.
+I would separate catalog and availability concerns more explicitly. Product metadata such as titles, images, and options would be fetched and cached independently from availability, while inventory would either be fetched through a dedicated availability layer or validated during interaction. This allows each type of data to use different cache strategies, TTLs, or event-driven invalidation when products go live or sell out.
 
-The patterns above are additive; the assessment code stays a readable baseline for how the list is shaped and how HTTP caching is layered on top of **mock.shop** fetches today.
+Configuration and go-live behavior would be managed through environment configuration or feature flags rather than hardcoded constants. At launch, I would trigger targeted cache invalidation or revalidation for the PLP and product list JSON so that pre-launch content does not persist after products become available.
+
+For observability and resilience, I would add monitoring around Storefront API latency, route performance, and error rates during traffic spikes. This would help ensure the system remains stable and responsive under load.
+
+Finally, I would treat variant preview depth and deferred loading behavior as configurable rather than fixed. In production, these values would be adjusted based on real user behavior and performance data rather than a single static constant.
+
+These changes build on the existing architecture. The current implementation is intentionally a readable baseline that demonstrates how the PLP is structured, how variant data is shaped, and how HTTP caching is applied on top of mock.shop fetches.
 
 
 ## Summary
 
-This implementation demonstrates a production-minded approach to building a PLP in a headless commerce environment. It balances performance, usability, and correctness by limiting initial data, deferring complexity until user intent is clear, and validating critical information at the moment of interaction.
+This implementation reflects a production-minded approach to building a PLP in a headless Shopify storefront. It prioritizes fast initial render through constrained queries and progressive loading, ensuring that above-the-fold content is delivered quickly while additional data is fetched only when needed. By modeling variants at the product level rather than expanding them into separate entries, the interface remains clear, scannable, and aligned with merchandising intent.
 
-The result is a system that performs efficiently under normal conditions and remains resilient under high-traffic scenarios while still providing a clear and intuitive shopping experience.
+The data layer is designed to minimize unnecessary payload size while still supporting meaningful interaction. Variant data is intentionally bounded on initial load and expanded only when the user expresses intent, which allows the system to scale across products with varying levels of complexity without degrading performance. This approach keeps the client lightweight and focused on interaction, while the server owns data shaping, normalization, and caching decisions.
+
+At the same time, the implementation treats availability as inherently volatile. The PLP is allowed to remain cacheable and fast, while inventory is validated closer to the point of interaction. This separation ensures that browsing performance is preserved without compromising correctness where it matters most. Under high-traffic conditions, this design avoids unnecessary pressure on the Storefront API while still providing a consistent and predictable user experience.
+
+Overall, the system balances performance, usability, and correctness by limiting initial data, deferring complexity until user intent is clear, and validating critical information at the moment of interaction. The result is a PLP that performs efficiently under normal conditions, remains resilient during high-traffic events, and provides a clear and intuitive path to purchase while leaving room for production-level enhancements such as server-side cart validation and more granular data separation.
