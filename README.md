@@ -8,6 +8,48 @@ The architecture is designed around real-world ecommerce concerns. It prioritize
 
 **Project deployment:** [https://jellycat-plp-assessment.vercel.app/](https://jellycat-plp-assessment.vercel.app/)
 
+## Table of contents
+
+Flat, **in-order** outline of every main heading (skim the doc top to bottom). For a **themed** index (caching, drops, file links), use [Reader’s map](#readers-map) under this block.
+
+- [Local development](#local-development)
+- [PageSpeed Insights](#pagespeed-insights)
+- [Runtime model overview](#runtime-model-overview)
+- [Part 2 — Written explanation](#part-2--written-explanation)
+  - [Original assessment prompt (Part 2)](#original-assessment-prompt-part-2)
+  - [Part 2 summarized answer](#part-2-summarized-answer)
+  - [Variant expansion model](#variant-expansion-model)
+  - [Query design](#query-design)
+  - [Server / client boundary](#server--client-boundary)
+  - [Trade-off](#trade-off)
+- [Part 3 — Drop scenario (100× traffic spike)](#part-3--drop-scenario-100x-traffic-spike)
+  - [Original assessment prompt (Part 3)](#original-assessment-prompt-part-3)
+  - [Part 3 summarized answer](#part-3-summarized-answer)
+  - [What breaks or degrades?](#what-breaks-or-degrades)
+  - [Caching strategy](#caching-strategy)
+  - [Communicating staleness](#communicating-staleness)
+  - [Demo product: men’s crewneck (variant inventory and concurrency)](#demo-product-mens-crewneck-variant-inventory-and-concurrency)
+  - [Pre-launch and transition to live](#pre-launch-and-transition-to-live)
+  - [Performance vs availability trade-off](#performance-vs-availability-trade-off)
+  - [SEO, observability, and failure handling](#seo-observability-and-failure-handling)
+- [Summary](#summary)
+
+> **On GitHub:** if an anchor does not jump (e.g. punctuation in a heading), open the README on the site, use the “link to heading” icon on that heading, and replace the hash in this list.
+
+## Reader’s map
+
+| Section | What you’ll find |
+|--------|-------------------|
+| [Table of contents](#table-of-contents) | full **in-order** list of every main section and subsection (for scanning the doc like a book). |
+| [Local development](#local-development) | install, dev, and production `build` / `start`. |
+| [PageSpeed Insights](#pagespeed-insights) | links to current PSI runs for the deployed app. |
+| [Runtime model overview](#runtime-model-overview) | **source-of-truth numbers** for product batches, GraphQL variant `first:`, and the normalized card preview (must match `app/`). |
+| [Part 2 — Written explanation](#part-2--written-explanation) | [prompt (Part 2)](#original-assessment-prompt-part-2) · [short answer](#part-2-summarized-answer) · [variant expansion](#variant-expansion-model) · [query design](#query-design) · [server / client + `Cache-Control`](#server--client-boundary) · [trade-off](#trade-off). |
+| [Part 3 — Drop / 100× traffic](#part-3--drop-scenario-100x-traffic-spike) | [prompt (Part 3)](#original-assessment-prompt-part-3) · [short answer](#part-3-summarized-answer) · [degrades / caching / staleness](#what-breaks-or-degrades) · [demo product (men’s crewneck)](#demo-product-mens-crewneck-variant-inventory-and-concurrency) · [pre-launch & live](#pre-launch-and-transition-to-live) · [SEO & observability](#seo-observability-and-failure-handling) · [conclusion + business outcome](#summary). |
+| [Summary](#summary) | end-to-end recap, cache `no-store` file pointers, and closing **In conclusion** (technical + business). |
+
+Skim the **table** to jump; read **Runtime model** when checking that this document matches the repo.
+
 ## Local Development
 
 ```bash
@@ -35,16 +77,18 @@ The PLP uses a progressive rendering strategy to balance performance and complet
 
 This results in an initial visible set of eight products. Beyond that point, additional products are loaded only when the user explicitly requests them by clicking “Load more products.” Each load-more request fetches the next page of products in batches of eight using cursor-based pagination.
 
-The system uses the following constants to enforce **consistent, documented defaults**; they are not fixed by the architecture. A team can **change** how many products render in the first server pass, how many are deferred, batch size, and how many variant previews ship per card based on **merchandising needs**, **measured web vitals**, and follow-up **performance testing** (for example, raising the SSR set if the crawler path matters more, or trimming previews under slow networks).
+These are the **real values in code** (not a separate “constants” module of fake names). Product counts are passed into [`getMenCollectionProducts`](app/lib/mock-shop.server.ts) from the routes; variant **GraphQL** `first` comes from [`PREVIEW_VARIANT_FETCH_LIMIT`](app/lib/mock-shop/constants.ts); the **card** shows at most [`PREVIEW_VARIANT_MODEL_LIMIT`](app/lib/mock-shop/constants.ts) rows after server-side `selectPreviewVariants` (see [`app/lib/mock-shop/normalize.ts`](app/lib/mock-shop/normalize.ts)). Swatch/size **UI** limits use [`PREVIEW_COLOR_LIMIT` / `PREVIEW_SIZE_LIMIT`](app/lib/mock-shop/constants.ts) (3 each) in the client PLP when rendering preview controls.
 
-```ts
-export const INITIAL_SSR_PRODUCTS = 4;
-export const DEFERRED_PRODUCTS = 4;
-export const PAGE_SIZE = 8;
-export const PREVIEW_VARIANTS_PER_PRODUCT = 4;
-```
+| Concern | Where | Value |
+|--------|--------|--------|
+| First **SSR** product window | [`app/routes/_index.tsx`](app/routes/_index.tsx) `loader` | `getMenCollectionProducts({ first: 4, … })` |
+| **Deferred** second product window (same page) | same, chained after first page’s `endCursor` | `getMenCollectionProducts({ first: 4, after: data.pageInfo.endCursor })` |
+| **Load more** API | [`app/routes/api.products.tsx`](app/routes/api.products.tsx) | `getMenCollectionProducts({ first: 8, … })` → `PRODUCT_PAGE_SIZE` |
+| GraphQL `variants(first: N)` for list | [`getMenCollectionProducts` variables](app/lib/mock-shop.server.ts) | `previewVariants: PREVIEW_VARIANT_FETCH_LIMIT` = **12** |
+| **Normalized** `previewVariants` on `PlpProduct` | `selectPreviewVariants` in [normalize](app/lib/mock-shop/normalize.ts) | at most **5** = `PREVIEW_VARIANT_MODEL_LIMIT` |
+| [Optional] The README query snippet below | illustrates shape only | `first` and `$previewVariants` are **variables**; the numbers above are the actual arguments. |
 
-This approach ensures that above-the-fold content is prioritized, while deeper browsing remains efficient and driven by user intent.
+This approach ensures that above-the-fold **products** are prioritized, while the card only ships a **bounded** preview of variants even though the query may read up to 12 nodes per product from mock.shop.
 
 # Part 2 · Written Explanation
 
@@ -67,7 +111,7 @@ I chose a product-first variant model: each product appears once on the PLP with
 
 ## Variant Expansion Model
 
-The PLP uses a product-based variant expansion model, where each product is represented by a single card and only a bounded preview of its variants is loaded initially. Specifically, the system fetches the first four variants per product, which are sufficient to support initial interactions such as color swatch selection and size selection.
+The PLP uses a product-based variant expansion model, where each product is represented by a single card and only a **bounded** preview of its variants is used initially. The list query asks mock.shop for up to **`PREVIEW_VARIANT_FETCH_LIMIT` (12)** variant nodes per product, then the server **normalizes** to at most **`PREVIEW_VARIANT_MODEL_LIMIT` (5)** `PlpVariant` rows (with additional rules for which colors/sizes show first—see [normalize](app/lib/mock-shop/normalize.ts)). That is enough to power swatch and size selection on the card without shipping the full matrix.
 
 This decision was made to balance performance and usability. Representing each variant as its own card was rejected because it would dramatically increase the number of rendered elements, degrade scanability, and break merchandising intent. Loading all variants for every product at initial render was also rejected because it would significantly increase payload size and slow down page load time.
 
@@ -148,15 +192,19 @@ query MenCollectionProducts(
 }
 ```
 
-The following constants are applied:
+The following **runtime arguments** (see [Runtime model overview](#runtime-model-overview) table) and GraphQL **variables** apply **in the repo**:
 
 ```ts
-collectionHandle = "men"
-first = 4 (SSR) or 8 (pagination)
-previewVariants = 4
+// Collection handle: MEN_COLLECTION_HANDLE
+collectionHandle = "men";
+// getMenCollectionProducts `first` — from the route, not a single global:
+//   index initial + deferred: 4 and 4
+//   /api/products load more: 8  (PRODUCT_PAGE_SIZE)
+// GraphQL men collection query (mock.shop) — from server adapter:
+previewVariants: PREVIEW_VARIANT_FETCH_LIMIT; // 12
 ```
 
-The full variant matrix is deliberately excluded from this query. Instead, it is fetched on demand when the user interacts with a specific product. This ensures that large variant sets do not impact initial load performance.
+**Do not** read the query’s `variants(first: $previewVariants)` as “4 on the wire”: **12** is the variable value used in the adapter. The **card** still only **renders** up to **5** preview rows after normalization, which is a separate step from the raw `nodes` length. The full variant matrix is deliberately excluded from this **list** query. Instead, it is fetched on demand when the user interacts with a specific product. This ensures that large variant sets do not impact initial load performance.
 
 All data returned from the Storefront API is normalized on the server into a simplified view model before being sent to the client. This removes the need for the frontend to interpret raw GraphQL responses and ensures a stable contract for UI rendering.
 
