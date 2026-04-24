@@ -4,6 +4,8 @@ This repository implements a variant-aware Product Listing Page (PLP) and suppor
 
 The architecture is designed around real-world ecommerce concerns. It prioritizes product-level merchandising, bounded data fetching, progressive rendering for fast initial load, and realistic handling of inventory volatility under high-traffic conditions. The implementation is scoped to the `men` collection and avoids representing variants as separate product cards in order to preserve merchandising clarity and maintain a clean browsing experience.
 
+**Assessment scope (routes):** the work in this document applies to the **PLP** (`/`, [`app/routes/_index.tsx`](app/routes/_index.tsx)), the **product** route used when a shopper follows a product link from the list ([`app/routes/products.$handle.tsx`](app/routes/products.$handle.tsx)), and the **list / variants** API modules those flows call. The repo still includes Hydrogen template routes such as **account** and cart shells; this assessment does **not** exercise, customize, or document those flows. Treat them as stock scaffolding, not part of the submission.
+
 **Project deployment:** [https://jellycat-plp.vercel.app/](https://jellycat-plp.vercel.app/)
 
 ## Local Development
@@ -166,20 +168,27 @@ Second, option normalization is not trivial and is explicitly handled in code. O
 
 The server is responsible for all data fetching, normalization, and caching. It communicates with the mock.shop API, applies query constraints, transforms the raw data into a simplified view model, and derives product-level availability states. It also defines caching policies and ensures that only the minimal required data is sent to the client.
 
-The server uses the following cache policies:
+The server uses the following `Cache-Control` values (from route modules):
 
 ```ts
-PLP route (HTML/document):
-Cache-Control: public, max-age=60, stale-while-revalidate=120
+PLP `headers()` (default document / first paint):
+  public, max-age=60, s-maxage=60, stale-while-revalidate=120
 
-/api/products (pagination):
-Cache-Control: public, max-age=15, s-maxage=30, stale-while-revalidate=90
+PLP `loader` when the URL has `?after=` (treated as a paginated first request):
+  no-store
 
-/api/products/:handle/variants:
-Cache-Control: public, max-age=2, s-maxage=5, stale-while-revalidate=15
+PLP `loader` for the initial deferred response (no `?after=`):
+  public, max-age=45, s-maxage=60, stale-while-revalidate=120
+
+GET /api/products (load more):
+  public, max-age=15, s-maxage=30, stale-while-revalidate=90
+
+GET /api/products/:handle/variants (expand all options for one product):
+  public, max-age=2, s-maxage=5, stale-while-revalidate=15
+  (on error) no-store
 ```
 
-These values reflect the relative volatility of the data. Product listings can tolerate short-term staleness, while variant availability must be fresher.
+**In short:** longer TTLs + `stale-while-revalidate` for things that can be a little behind; very short TTLs (or `no-store`) for URLs or payloads where cursors, inventory, or per-user paths would make a shared cache misleading.
 
 The client is responsible for rendering UI and handling interactions. It manages variant selection, triggers deferred data fetches, updates the UI in response to user actions, and handles quick-add functionality. It also validates availability at the moment of interaction to ensure correctness.
 
@@ -216,13 +225,18 @@ A second-order production risk is cache stampede at revalidation boundaries. If 
 
 ## Caching Strategy
 
-The system uses a tiered caching strategy based on data volatility. The PLP document is cached for 60 seconds with stale-while-revalidate, allowing fast delivery under load. Collection and pagination data are cached for 15–30 seconds, which reduces API pressure while still allowing frequent updates.
+**Plain summary:** one cache size does not fit all. The HTML for the first PLP view and the “load more” JSON are allowed to be **a little stale** for a **short, controlled** window so the site stays fast when traffic jumps. Anything that depends on **which page of the list you are on** or **whether this exact variant is still available** either uses a **shorter** cache, **`no-store`**, or a **fresh read at add time**—see the `Cache-Control` list above for the exact numbers.
 
-Variant availability is treated as highly volatile and is cached for only 2–5 seconds or revalidated at interaction time. This ensures that critical actions such as adding items to the cart rely on fresher data.
+**What that means in practice**
 
-This strategy allows the system to absorb traffic spikes efficiently without sacrificing responsiveness.
+- The **default PLP document** is the best candidate for a warm cache: many people request the same URL, and a small lag behind the very latest data is usually acceptable.
+- A **PLP URL that already includes `?after=…`** (cursor from pagination) is **`no-store`** so a paginated first load is not mixed up with the normal home page in a shared cache.
+- **`GET /api/products`** (load the next set of products) is cached for **tens of seconds**, not minutes: good sharing across users who click “load more” around the same time, but the list can refresh often enough for drops and sort changes.
+- **`GET /api/products/…/variants`** (full options for one product) is the **most time-sensitive** JSON: only a few seconds in shared caches. **Quick add still re-fetches** on the client right before a demo add, so the browser cache is not the last word on “can I buy this SKU right now.”
 
-For cursor-based pagination, there is also an important cache-key consideration. Different users may request different cursors, which naturally reduces cache reuse as pagination depth diverges. A production optimization here is to pre-compute and embed the next cursor for the common path and maximize shared cache keys for early pages before user paths fan out. Concretely, page-2 requests can share one key (same embedded cursor from page 1) across most users, while page-3+ naturally diverge as behavior branches.
+**Under spike traffic,** most visitors hit the same few URLs; those responses can be served or refreshed cheaply at the edge. Deeper pages and rarer cursors are requested less often, so lower cache hit rate there is usually an acceptable trade.
+
+**Cursors and cache keys:** “next page” is a **different URL** for almost every step (`after=<cursor>`). So many users **share the first page**, but far fewer share the same **third or fourth** cursor—**natural cache sharding**, not a bug. In production, teams sometimes **return the next cursor in the first response** (HTML or first API) so the **common** “go to page 2” request stays **identical for more people** and stays hotter in the cache, while long-tail cursors stay cold.
 
 ## Communicating Staleness
 
@@ -275,6 +289,19 @@ This implementation delivers a production-minded foundation for a headless ecomm
 
 From a data architecture perspective, the system separates concerns cleanly: server-side modules own query transport, normalization, availability derivation, and cache policy decisions; the client owns rendering, option interaction state, and user-triggered fetches such as load-more, variant expansion, and add-time checks. This keeps frontend UI logic simpler and more resilient while making data contracts explicit and stable.
 
-From an operational perspective, the implementation acknowledges real drop constraints: list-level availability is best-effort, interaction-time validation is authoritative, and cache TTLs are tuned by endpoint volatility. The documented trade-offs around selection persistence, stale-data windows, cache stampede risk, cursor-key divergence, SEO implications of deferred content, and upstream failure handling show where the current implementation is intentionally pragmatic for the assessment and where production hardening would continue.
+From an operational perspective, the implementation lines up **how stale the UI is allowed to be** with **how much it costs to stay fresh**. **List-level availability is best-effort** because the PLP comes from **cached, batched** fetches. By the time a shopper sees a badge or price, someone else may already have bought the last unit, or a cache may still be showing a few seconds of age. The listing does not **hold** inventory, so that row is a **reasonable snapshot in time**, not a guarantee the SKU is still there.
 
-Overall, the result is a PLP/PDP experience that is performant under normal browsing, understandable to users when inventory changes quickly, and structurally aligned with how modern ecommerce teams build for high-concurrency traffic events without sacrificing day-to-day usability.
+**Interaction-time checks are the “authoritative” step in this app (relative to the list):** they run **at the last moment before add**, on purpose fresher than the first paint. Here that means a **re-fetch of variant data** and a hard block on add if the data says sold out; in production the same *job* would usually sit in a **server cart or order service**, not a browser. “Authoritative” does not mean legally final—it means **this is the check you trust to decide the action**, not the older pixels on the card.
+
+**TTLs are tuned to volatility in a straightforward way:** if the answer is allowed to be slightly old without serious harm, TTL + `stale-while-revalidate` can be **longer** (PLP, load more). If the answer changes fast, is **per-user** (cursors in the URL), or is **stock-sensitive** (per-product variants), TTLs are **shorter** and the UI leans on **re-read at action time** again. **`no-store` is not scattered at random; it is used where a shared or browser cache would be wrong or unsafe:**
+- **[`app/routes/_index.tsx`](app/routes/_index.tsx) loader, when the request URL has `?after=…`:** the response is a **cursor-scoped** first document, not the default PLP at `/`. **`no-store`** keeps a **paginated entry** from being **stored as the canonical home document** in a shared cache, which would be the wrong list slice for other shoppers hitting `/`.
+- **[`app/routes/api.products.$handle.variants.tsx`](app/routes/api.products.$handle.variants.tsx) on the error / catch path:** the JSON for “expand options” failed. **`no-store`** avoids **caching a failure (or half-response) as if it were a successful** variant matrix the next time someone opens that product.
+- **Load more from the client** ([`app/hooks/useMenPlpCollection.ts`](app/hooks/useMenPlpCollection.ts)): the `fetch` to `GET /api/products?…` uses `cache: 'no-store'` so the **browser** does not hand back a **stale page of products** from its HTTP cache when the user loads the next chunk.
+
+The rest of this document (selection persistence, stale windows, cache stampede, cursor keys, deferred/SEO, upstream failure handling) is where the assessment build stops and production hardening would keep going.
+
+**What the implementation is doing (and why, against the brief):** the list is less expensive to render and fetch than a variant-per-row grid or loading a full matrix for every line because **product-level cards and preview variants** bound payload and DOM. The index route **server-renders a small first set** and **streams the next batch** so the first screen is not waiting on the entire first page in one monolithic pass. Deeper fetches—**load more** and the **per-product full variant matrix**—run only on explicit user action, so cost tracks **user-driven** requests from the exercise (pagination, expansion) instead of every visit paying for a worst-case catalog.
+
+**Normalization** into `PlpProduct` / `PlpVariant` keeps option naming, availability, and assessment demos out of ad hoc UI string checks: there is **one** server-owned place to change behavior. **Per-route `Cache-Control` in code** makes the “fast vs fresh” trade **auditable** (headers, not just README adjectives). The **add-time re-fetch** before a demo add encodes the real rule that **a cached listing is not a stock hold**; with a real cart, the same idea moves to a **server-side** check or transaction, but the **layering** (list vs commit) stays.
+
+In conclusion, this assessment delivers a working **men’s collection PLP** on **`mock.shop`**: **product-level cards** with a **small variant preview**, a **first paint** from **SSR of an initial batch** plus **deferred** products, **load more** with **cursor pagination**, and **per-product “more options”** fetches for the full variant matrix on demand. The server **normalizes** upstream data into **stable `PlpProduct` / `PlpVariant` models**, sets **explicit `Cache-Control`** on the PLP and related API responses, and the **quick-add** path **re-fetches** variant data so a listing is not treated as a stock reservation. That is the end-to-end behavior the assessment brief asks to justify in writing and in code. The same design choices are what a revenue-focused team needs from a PLP in production: a page that **loads quickly and remains usable** when traffic spikes, **keeps add-to-cart within the listing** for common paths, and **aligns work and cost** with what shoppers actually do (progressive loading, explicit expansion, a fresh check at add) instead of over-fetching on every visit. Stated in business terms, that supports **higher conversion and AOV** (less friction, clearer options), **stronger performance during high-traffic selling windows** (drops, promos) without timeouts or false “in stock” signals, and **lower cost of bad inventory UX** (abandonment, support load, and trust erosion) because the experience matches real availability. The collection page is the top of the funnel; this pattern is about turning **visits into orders** at scale.
