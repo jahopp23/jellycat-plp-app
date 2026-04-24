@@ -24,10 +24,10 @@ npm run start
 
 ## PageSpeed Insights
 
-- [Desktop — PageSpeed Insights](https://pagespeed.web.dev/analysis/https-jellycat-plp-vercel-app/7ybd2g4s1i?form_factor=desktop)
-- [Mobile — PageSpeed Insights](https://pagespeed.web.dev/analysis/https-jellycat-plp-vercel-app/7ybd2g4s1i?form_factor=mobile)
+- [Desktop — PageSpeed Insights](https://pagespeed.web.dev/analysis/https-jellycat-plp-assessment-vercel-app/504hlel58b?form_factor=desktop)
+- [Mobile — PageSpeed Insights](https://pagespeed.web.dev/analysis/https-jellycat-plp-assessment-vercel-app/504hlel58b?form_factor=mobile)
 
-For a production hardening pass, I would use the [mobile report](https://pagespeed.web.dev/analysis/https-jellycat-plp-vercel-app/7ybd2g4s1i?form_factor=mobile) to drive fixes for the issues it calls out (for example shortening the critical request path, reducing forced reflows from layout reads after style changes, and tightening how CSS/JS are loaded so the first paint is less blocked). Scores and diagnostics move with each deploy, so the README only links the reports.
+For a production hardening pass, I would use the PSI reports to drive fixes for the issues it calls out (for example shortening the critical request path and tightening how CSS/JS are loaded so the first paint is less blocked). Scores and diagnostics move with each deploy, so the README only links the reports.
 
 ## Runtime Model Overview
 
