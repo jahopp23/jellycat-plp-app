@@ -140,6 +140,15 @@ Finally, I would treat variant preview depth and deferred loading behavior as co
 
 These changes build on the existing architecture. The current implementation is intentionally a readable baseline that demonstrates how the PLP is structured, how variant data is shaped, and how HTTP caching is applied on top of mock.shop fetches.
 
+## Demo Scenarios (Intentional Edge Cases)
+
+To make variant handling and availability states explicit in the UI, a few products are intentionally configured to demonstrate edge cases:
+
+The Men’s Crewneck product includes a variant that is unavailable. Selecting this option surfaces the “This option is not available” state in the UI and demonstrates how disabled variants are handled at the list and interaction level.
+
+The Canvas Sneakers product is used to represent a pre-launch state. It is rendered as “Coming soon,” with interactions disabled, to demonstrate how products can be shown before go-live while remaining cacheable and safe under traffic.
+
+These scenarios are intentionally introduced for the assessment so that sold-out variants, disabled selections, and pre-launch behavior are visible and testable without relying on live inventory change
 
 ## Summary
 
