@@ -47,15 +47,15 @@ export async function loader({request}: LoaderArgs) {
       headers: {
         'Cache-Control': isPaginationRequest
           ? 'no-store'
-          : 'public, max-age=45, s-maxage=60, stale-while-revalidate=120',
+          : 'public, max-age=30, s-maxage=60, stale-while-revalidate=120',
       },
     },
   );
 }
 
 export const headers = () => ({
-  // PLP document response cache policy for drop resilience.
-  'Cache-Control': 'public, max-age=60, s-maxage=60, stale-while-revalidate=120',
+  // Same policy as the loader: ~30s browser, ~60s shared cache, SWR 120s (aligns with README).
+  'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=120',
 });
 
 export default function Index() {
