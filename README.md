@@ -6,7 +6,7 @@ The architecture is designed around real-world ecommerce concerns. It prioritize
 
 **Assessment scope (routes):** the work in this document applies to the **PLP** (`/`, [`app/routes/_index.tsx`](app/routes/_index.tsx)), the **product** route used when a shopper follows a product link from the list ([`app/routes/products.$handle.tsx`](app/routes/products.$handle.tsx)), and the **list / variants** API modules those flows call. The repo still includes Hydrogen template routes such as **account** and cart shells; this assessment does **not** exercise, customize, or document those flows. Treat them as stock scaffolding, not part of the submission.
 
-**Project deployment:** [https://jellycat-plp.vercel.app/](https://jellycat-plp.vercel.app/)
+**Project deployment:** [https://jellycat-plp-assessment.vercel.app/](https://jellycat-plp-assessment.vercel.app/)
 
 ## Local Development
 
