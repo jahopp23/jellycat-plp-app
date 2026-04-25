@@ -42,15 +42,17 @@ In a production system, this model would remain the same, but the preview size c
 
 ## Query design
 
-The query design is intentionally constrained at the list level to keep the initial payload small and predictable. The server fetches only the data required to render product cards and support basic interaction, including product identity, imagery, pricing, option metadata, and a limited set of variants.
+The query design is intentionally constrained at the list level to keep the initial payload small, predictable, and fast to render.
 
-The initial render fetches four products, and an additional four are streamed using Remix `defer`, resulting in eight visible products. Each product includes only a preview of its variants, capped to a small number. The full variant matrix is deliberately excluded from this query.
+At the PLP level, the server fetches only the data required to render product cards and support basic interaction. This includes product identity (id, handle, title), imagery, price range, option metadata (such as color and size), and a limited set of variants. Variant data is capped to a small preview set (four per product), which is sufficient to power color swatches, size selection, and quick add behavior.
 
-When a user requests more options for a product, the application calls a separate endpoint to fetch all variants for that product. This ensures that larger data sets are only loaded when needed.
+The initial render fetches four products, and an additional four are streamed using Remix defer, resulting in eight visible products. Pagination is handled using cursors, with subsequent requests fetching additional products in batches when the user clicks “Load more.”
 
-All data returned from the Storefront API is normalized on the server into a simplified view model before being passed to the client. This prevents the frontend from needing to interpret raw GraphQL responses and keeps UI logic focused on rendering.
+The query deliberately excludes the full variant matrix for each product. Fetching all variants at the list level would significantly increase payload size, especially for products with multiple options, and is not necessary for the majority of interactions on a listing page. Instead, full variant data is fetched on demand through a separate endpoint when the user selects “View more options” for a specific product.
 
-In production, this approach would be extended by separating product metadata and availability at the query level. Product data could be cached more aggressively, while availability would be fetched or validated independently to improve both performance and accuracy.
+After fetching data from the Storefront API, the server normalizes the response into a simplified view model before sending it to the client. This model flattens the GraphQL structure into a predictable shape, extracts relevant option groupings (such as colors and sizes), and derives product-level availability from the variant preview set. By shaping the data on the server, the client does not need to interpret raw GraphQL responses and can remain focused on rendering and interaction.
+
+In a production system, this approach would be extended by separating product metadata from availability at the query level. Product data could be cached more aggressively, while availability would be fetched or validated independently to improve both performance and accuracy
 
 
 ## Server / client boundary
