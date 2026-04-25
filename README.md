@@ -68,11 +68,9 @@ In a production system, this boundary would be reinforced by introducing a serve
 
 ## Trade-off to revisit in production
 
-The primary trade-off in this implementation is that not all variants are visible on initial render. This improves performance and reduces payload size but requires an additional interaction for users who want to see the full set of options.
+In this implementation, the trade-off is that the PLP only exposes a limited preview of variants on initial render, which improves performance but requires an additional interaction to access the full set of options. This means some users may not immediately see all available configurations, particularly for products with multiple sizes and colors.
 
-This decision prioritizes speed and scalability, which are critical for a listing page that may contain many products with complex variant combinations.
-
-In production, this trade-off could be revisited by adapting the preview size based on product type or user behavior. Additionally, selective prefetching could be introduced for high-intent interactions, reducing the need for a secondary fetch without increasing the cost of the initial render.
+In production, I would revisit this by tuning the preview depth based on product complexity and user behavior. For simpler products with few variants, I would return the full variant set at the list level to eliminate the need for a secondary fetch. For more complex products, I would keep the preview model but selectively prefetch the full variant matrix when there are strong intent signals, such as hover, focus, or interaction with the product card. This reduces perceived latency without increasing the cost of the initial page load
 
 
 # Part 3: Drop scenario
